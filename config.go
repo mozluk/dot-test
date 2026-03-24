@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -12,6 +13,28 @@ type Config struct {
 	DNSPort     int
 	PortmapFile string
 	PidFile     string
+}
+
+// configDir returns ~/.config/dot-test, creating it if needed.
+func configDir() string {
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, ".config", "dot-test")
+	os.MkdirAll(dir, 0755)
+	return dir
+}
+
+// savedProjectsDir reads the persisted projects directory, if any.
+func savedProjectsDir() string {
+	data, err := os.ReadFile(filepath.Join(configDir(), "projects_dir"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// saveProjectsDir persists the projects directory for future use.
+func saveProjectsDir(dir string) {
+	os.WriteFile(filepath.Join(configDir(), "projects_dir"), []byte(dir+"\n"), 0644)
 }
 
 func loadConfig() Config {
@@ -34,11 +57,12 @@ func loadConfig() Config {
 		}
 	}
 
+	cdir := configDir()
 	return Config{
 		ProjectsDir: dir,
 		ProxyPort:   proxyPort,
 		DNSPort:     dnsPort,
-		PortmapFile: filepath.Join(dir, ".dot-test"),
-		PidFile:     filepath.Join(dir, ".dot-test-pid"),
+		PortmapFile: filepath.Join(cdir, "portmap"),
+		PidFile:     filepath.Join(cdir, "pid"),
 	}
 }

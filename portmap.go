@@ -20,6 +20,15 @@ type PortMapping struct {
 // buildPortmap discovers apps, assigns stable ports, and persists the mapping.
 func buildPortmap(cfg Config) []PortMapping {
 	existing := loadPortmap(cfg.PortmapFile)
+
+	// Migrate legacy portmap from projects dir if new one is empty
+	if len(existing) == 0 {
+		legacy := filepath.Join(cfg.ProjectsDir, ".dot-test")
+		if legacyMappings := loadPortmap(legacy); len(legacyMappings) > 0 {
+			existing = legacyMappings
+		}
+	}
+
 	apps := findProjects(cfg.ProjectsDir)
 	usedPorts := make(map[int]bool)
 

@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -54,9 +54,9 @@ Environment:
   DOT_TEST_DNS_PORT  DNS listen port (default: 15353)
 
 Quickstart:
-  brew install dot-test
-  dot-test setup              # one-time, needs sudo
-  dot-test sync               # discover apps, assign ports
-  brew services start dot-test  # start daemon
+  brew tap zarpay/tap && brew install dot-test
+  dot-test setup                   # one-time, needs sudo
+  cd ~/projects && dot-test sync   # discover apps, assign ports
+  brew services start dot-test     # start daemon (survives reboots)
 `)
 }

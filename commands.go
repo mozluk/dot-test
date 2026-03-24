@@ -18,6 +18,7 @@ func cmdSync() {
 		fmt.Fprintf(os.Stderr, "No projects found in %s\n", cfg.ProjectsDir)
 		os.Exit(1)
 	}
+	saveProjectsDir(cfg.ProjectsDir)
 
 	maxName := 0
 	for _, pm := range mappings {
@@ -59,9 +60,9 @@ func cmdSync() {
 
 func cmdList() {
 	cfg := loadConfig()
-	mappings := buildPortmap(cfg)
+	mappings := loadPortmap(cfg.PortmapFile)
 	if len(mappings) == 0 {
-		fmt.Fprintf(os.Stderr, "No projects found in %s\n", cfg.ProjectsDir)
+		fmt.Fprintf(os.Stderr, "No portmap found. Run 'dot-test sync' first.\n")
 		os.Exit(1)
 	}
 
@@ -193,6 +194,18 @@ func cmdClean() {
 		os.Remove(cfg.PortmapFile)
 		fmt.Println("Port assignments removed")
 	}
+
+	// Clean up legacy portmap in projects dir if it exists
+	if saved := savedProjectsDir(); saved != "" {
+		legacy := filepath.Join(saved, ".dot-test")
+		if fileExists(legacy) {
+			os.Remove(legacy)
+			fmt.Println("Legacy portmap removed")
+		}
+	}
+
+	// Remove saved projects dir
+	os.Remove(filepath.Join(configDir(), "projects_dir"))
 
 	if runtime.GOOS == "darwin" {
 		resolverFile := "/etc/resolver/test"

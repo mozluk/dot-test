@@ -15,6 +15,7 @@ Zero dependencies. Single binary. Works with however you start your apps.
 ## Install
 
 ```sh
+brew tap zarpay/tap
 brew install dot-test
 ```
 
@@ -27,22 +28,26 @@ go install github.com/zarpay/dot-test@latest
 ## Quickstart
 
 ```sh
-cd ~/projects         # or wherever your apps live
-dot-test setup        # one-time macOS DNS config (needs sudo)
-dot-test sync         # discover projects, assign ports
-dot-test up           # start the daemon
+cd ~/projects                    # or wherever your apps live
+dot-test setup                   # one-time macOS DNS config (needs sudo)
+dot-test sync                    # discover projects, assign ports
+brew services start dot-test     # start daemon (survives reboots)
 ```
 
 Open `http://yourapp.test` in your browser.
 
+If you installed from source (not Homebrew), use `dot-test up` instead of `brew services`.
+
 ## How It Works
 
 1. **Discover** — Scans your projects directory for Rails apps (looks for `config/application.rb`)
-2. **Assign** — Gives each app a stable port number starting from 3000, persisted across runs
+2. **Assign** — Gives each app a stable port number starting from 3000, persisted in `~/.config/dot-test/`
 3. **Update** — Writes `PORT=<assigned>` to each app's `.env` file
 4. **Route** — Runs a DNS server (`.test` → `127.0.0.1`) and HTTP proxy (hostname → port)
 
 Your apps read the port from `.env` via dotenv-rails or foreman. You start them normally with `bin/dev`. dot-test handles the rest.
+
+Configuration is stored in `~/.config/dot-test/`, so the daemon works without needing to be started from your projects directory. This is what makes `brew services` (auto-start on reboot) work.
 
 ## Commands
 
@@ -59,7 +64,7 @@ dot-test help      Show help
 
 ## Port Assignment
 
-Ports are assigned sequentially starting from 3000 and persist in a `.dot-test` file inside your projects directory.
+Ports are assigned sequentially starting from 3000 and persist in `~/.config/dot-test/portmap`.
 
 dot-test respects hardcoded ports. Before assigning, it checks:
 
@@ -74,16 +79,15 @@ Hardcoded ports show as `(pinned)` in output. Other projects are assigned ports 
 
 ```
 $ dot-test sync
-33 projects:
+13 projects:
 
-  http://empirium.test   -> localhost:3200 (pinned)
-  http://fizzy.test      -> localhost:3122 (pinned)
-  http://nexus.test      -> localhost:3013
-  http://praxis.test     -> localhost:3002
-  http://zar-core.test   -> localhost:3030
+  http://empirium.test   -> localhost:3011 (pinned)
+  http://fizzy.test      -> localhost:3006 (pinned)
+  http://nexus.test      -> localhost:3007
+  http://kr8d.test       -> localhost:3004
 
 Updating .env files...
-  33 updated
+  13 updated
 
 Done. Run 'dot-test up' to start the daemon.
 ```

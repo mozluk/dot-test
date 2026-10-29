@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,7 +20,9 @@ type Config struct {
 func configDir() string {
 	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, ".config", "dot-test")
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	}
 	return dir
 }
 
@@ -33,8 +36,12 @@ func savedProjectsDir() string {
 }
 
 // saveProjectsDir persists the projects directory for future use.
-func saveProjectsDir(dir string) {
-	os.WriteFile(filepath.Join(configDir(), "projects_dir"), []byte(dir+"\n"), 0644)
+func saveProjectsDir(dir string) bool {
+	if err := os.WriteFile(filepath.Join(configDir(), "projects_dir"), []byte(dir+"\n"), 0600); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return false
+	}
+	return true
 }
 
 func loadConfig() Config {

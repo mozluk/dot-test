@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -91,9 +92,9 @@ func matchPort(s, pattern string) int {
 	if len(m) < 2 {
 		return 0
 	}
-	var port int
-	for _, c := range m[1] {
-		port = port*10 + int(c-'0')
+	port, err := strconv.Atoi(m[1])
+	if err != nil || port < 1 || port > 65535 {
+		return 0
 	}
 	return port
 }

@@ -7,9 +7,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Server runs the embedded DNS resolver and HTTP reverse proxy.
@@ -57,7 +57,9 @@ func (s *Server) startDNS() error {
 		}
 		resp := s.handleDNS(buf[:n])
 		if resp != nil {
-			conn.WriteTo(resp, remote)
+			if _, err := conn.WriteTo(resp, remote); err != nil {
+				log.Printf("DNS response failed: %v", err)
+			}
 		}
 	}
 }
@@ -69,7 +71,7 @@ func (s *Server) handleDNS(query []byte) []byte {
 
 	id := binary.BigEndian.Uint16(query[0:2])
 	qdcount := binary.BigEndian.Uint16(query[4:6])
-	if qdcount == 0 {
+	if qdcount != 1 {
 		return nil
 	}
 
@@ -92,7 +94,7 @@ func (s *Server) handleDNS(query []byte) []byte {
 	binary.BigEndian.PutUint16(hdr[0:2], id)
 	if isMatch {
 		binary.BigEndian.PutUint16(hdr[2:4], 0x8400) // QR=1, AA=1, RCODE=0
-		binary.BigEndian.PutUint16(hdr[6:8], 1)       // ANCOUNT=1
+		binary.BigEndian.PutUint16(hdr[6:8], 1)      // ANCOUNT=1
 	} else {
 		binary.BigEndian.PutUint16(hdr[2:4], 0x8403) // QR=1, AA=1, RCODE=3 (NXDOMAIN)
 	}
@@ -122,71 +124,86 @@ func (s *Server) handleDNS(query []byte) []byte {
 // readDNSName parses a DNS name from wire format, handling label compression.
 func readDNSName(buf []byte, offset int) (string, int) {
 	var parts []string
-	pos := offset
-	jumped := false
-	retPos := -1
-
-	for pos < len(buf) {
-		length := int(buf[pos])
-		if length == 0 {
-			if !jumped {
-				retPos = pos + 1
-			}
-			break
+	pos, end, length := offset, -1, 0
+	visited := make(map[int]bool)
+	for {
+		if pos < 0 || pos >= len(buf) || visited[pos] {
+			return "", -1
 		}
-		// Pointer (compression)
-		if length&0xC0 == 0xC0 {
+		visited[pos] = true
+		n := int(buf[pos])
+		if n == 0 {
+			if end < 0 {
+				end = pos + 1
+			}
+			return strings.Join(parts, ".") + ".", end
+		}
+		if n&0xC0 == 0xC0 {
 			if pos+1 >= len(buf) {
 				return "", -1
 			}
-			if !jumped {
-				retPos = pos + 2
+			if end < 0 {
+				end = pos + 2
 			}
 			pos = int(binary.BigEndian.Uint16(buf[pos:pos+2]) & 0x3FFF)
-			jumped = true
 			continue
 		}
-		pos++
-		if pos+length > len(buf) {
+		if n > 63 || pos+1+n >= len(buf) {
 			return "", -1
 		}
-		parts = append(parts, string(buf[pos:pos+length]))
-		pos += length
+		length += n + 1
+		if length > 254 {
+			return "", -1
+		}
+		parts = append(parts, string(buf[pos+1:pos+1+n]))
+		pos += n + 1
 	}
-
-	if retPos < 0 {
-		retPos = pos + 1
-	}
-	return strings.Join(parts, ".") + ".", retPos
 }
 
-// --- HTTP reverse proxy ---
-
-func (s *Server) startProxy() error {
+// proxyHandler accepts only configured .test hosts and forwards to loopback.
+func (s *Server) proxyHandler() http.Handler {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 15 * time.Second
 	proxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			host := strings.Split(req.Host, ":")[0]
-			name := strings.TrimSuffix(host, ".test")
-			s.mu.RLock()
-			port, ok := s.routes[name]
-			s.mu.RUnlock()
-
-			if ok {
-				target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
-				req.URL.Scheme = target.Scheme
-				req.URL.Host = target.Host
-			}
-		},
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			host := strings.Split(r.Host, ":")[0]
-			name := strings.TrimSuffix(host, ".test")
-			w.WriteHeader(http.StatusBadGateway)
-			fmt.Fprintf(w, "dot-test: %s is not running\n\nStart it with: cd ~/projects/%s && bin/dev\n", host, name)
+		Transport: transport,
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.Out.URL.Scheme = "http"
+			r.Out.URL.Host = r.In.URL.Host
+			r.Out.Host = r.In.Host
+			r.SetXForwarded()
 		},
 	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := strings.ToLower(r.Host)
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		if !strings.HasSuffix(host, ".test") {
+			http.NotFound(w, r)
+			return
+		}
+		name := strings.TrimSuffix(host, ".test")
+		s.mu.RLock()
+		port, ok := s.routes[name]
+		s.mu.RUnlock()
+		if !ok || port < 1 || port > 65535 {
+			http.NotFound(w, r)
+			return
+		}
+		r.URL.Host = net.JoinHostPort("127.0.0.1", fmt.Sprint(port))
+		r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
+		proxy.ServeHTTP(w, r)
+	})
+}
 
-	addr := fmt.Sprintf(":%d", s.cfg.ProxyPort)
-	srv := &http.Server{Addr: addr, Handler: proxy}
+func (s *Server) startProxy() error {
+	addr := net.JoinHostPort("127.0.0.1", fmt.Sprint(s.cfg.ProxyPort))
+	srv := &http.Server{
+		Addr: addr, Handler: s.proxyHandler(),
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
+		WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+	}
 	log.Printf("HTTP proxy listening on %s", addr)
 	return srv.ListenAndServe()
 }
@@ -199,5 +216,14 @@ func (s *Server) run() error {
 	go func() { errCh <- s.startDNS() }()
 	go func() { errCh <- s.startProxy() }()
 
-	return <-errCh
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-errCh:
+			return err
+		case <-ticker.C:
+			s.loadRoutes()
+		}
+	}
 }

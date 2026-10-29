@@ -1,3 +1,3 @@
 module github.com/zarpay/dot-test
 
-go 1.22
+go 1.27.3

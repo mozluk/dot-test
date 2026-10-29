@@ -1,0 +1,24 @@
+name: Go security checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - run: go test -race ./...
+      - run: go vet ./...
+      - name: govulncheck
+        uses: golang/govulncheck-action@b6251b02ef019d8298940f7bf5cf1e4332d84526 # v1.0.4
+        with:
+          go-version-input: go1.27.3
+          go-package: ./...
+      - name: gosec
+        uses: securego/gosec@34d5f00194e93fcfb8a6901c4e7284640e1c1101 # master
+        with:
+          args: -severity medium ./...
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          "$(go env GOPATH)/bin/staticcheck" ./...

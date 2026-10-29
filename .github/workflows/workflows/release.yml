@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  update-tap:
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@dc588b651fe13675774614f8e6a936a468676387 # v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.TAP_DEPLOY_KEY }}
+
+      - name: Checkout tap
+        run: git clone git@github.com:zarpay/homebrew-tap.git tap
+
+      - name: Update formula tag
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          RELEASE_REVISION=$(git ls-remote https://github.com/zarpay/dot-test.git "refs/tags/$RELEASE_TAG^{}" | cut -f1)
+          if [ -z "$RELEASE_REVISION" ]; then
+            RELEASE_REVISION=$(git ls-remote https://github.com/zarpay/dot-test.git "refs/tags/$RELEASE_TAG" | cut -f1)
+          fi
+          [[ "$RELEASE_REVISION" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          cd tap
+          sed -i "s|revision: \"[0-9a-f]*\"|revision: \"$RELEASE_REVISION\"|" Formula/dot-test.rb
+          sed -i "s|tag: \"v[^\"]*\"|tag: \"${RELEASE_TAG}\"|" Formula/dot-test.rb
+          cat Formula/dot-test.rb
+
+      - name: Commit and push
+        run: |
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/dot-test.rb
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "Bump dot-test to ${RELEASE_TAG}"
+          git push
